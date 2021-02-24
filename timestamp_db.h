@@ -11,6 +11,7 @@
 #define ERR_INVALID_ARG -4
 #define ERR_SPACE_NOT_ENOUGH -5
 #define ERR_NO_ITEM -6
+#define ERR_INVALID_OPERATION -7
 
 #define MAXTIMEBYTES 50
 #define MAXFILENAME 100
@@ -41,7 +42,7 @@ typedef struct {
 } db_item_s;
 
 // ret normal: 0, ERR_INVALID_ARG, ERR_MEM
-// int openTimestampDB(db_handler_s *db_handler, char *db_name, db_access_mode_enum mode, int write_size, int debug);
+int openTimestampDB(db_handler_s *db_handler, char *db_name, db_access_mode_enum mode, int write_size, int debug);
 // potential bug: db_handler not init
 int writeTimestampDB(db_handler_s *db_handler, db_item_s *data);
 int readTimestampDB(db_handler_s *db_handler, time_t start, time_t end, db_item_s *ret_data);

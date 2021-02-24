@@ -31,6 +31,7 @@ typedef struct {
 	size_t item_count;
 	char *name;
 	char *write_pos;
+	unsigned int write_size;
 	pthread_mutex_t lock;
 	// struct timespec last_event_time;
 	db_access_mode_enum mode;
@@ -44,7 +45,7 @@ typedef struct {
 // ret normal: 0, ERR_INVALID_ARG, ERR_MEM
 int openTimestampDB(db_handler_s *db_handler, char *db_name, db_access_mode_enum mode, int write_size, int debug);
 // potential bug: db_handler not init
-int writeTimestampDB(db_handler_s *db_handler, db_item_s *data);
+// int writeTimestampDB(db_handler_s *db_handler, db_item_s *data);
 int readTimestampDB(db_handler_s *db_handler, time_t start, time_t end, db_item_s *ret_data);
 int closeTimestampDB(db_handler_s *db_handler);
 

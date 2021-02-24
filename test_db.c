@@ -47,6 +47,7 @@ int main(int argc, char const *argv[])
         writeTimestampDB(&db_1, &item);
         free(item.data);
     }
+    closeTimestampDB(&db_1);
     // free(linptr);
 
     // time_t end = time(NULL);

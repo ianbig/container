@@ -56,6 +56,7 @@ int openTimestampDB(db_handler_s *db_handler, char *db_name, db_access_mode_enum
     db_handler->debug = debug;
     db_handler->status = 1;
     db_handler->item_count = 0;
+    db_handler->write_size = 0;
     // db_handler->last_event_time = {0};
 
     pthread_mutex_init(&(db_handler->lock), NULL);
@@ -83,8 +84,8 @@ int closeTimestampDB(db_handler_s *db_handler) {
     }
 
     if(db_handler->mode == WRITE) {
-        FILE *fptr = fopen(db_handler->db_log_path, "r");
-        fwrite(db_handler->db_mem_addr, sizeof(char),db_handler->size, fptr);
+        FILE *fptr = fopen(db_handler->db_log_path, "a");
+        fwrite(db_handler->db_mem_addr, sizeof(char), db_handler->write_size, fptr);
         fclose(fptr);
     }
 
@@ -131,14 +132,16 @@ int writeTimestampDB(db_handler_s *db_handler, db_item_s *item) {
     pthread_mutex_lock(&db_handler->lock);
     snprintf(db_handler->write_pos, db_handler->capacity, "%s:%s\n", timestamp, item->data);
     db_handler->capacity = db_handler->capacity - strlen(db_handler->write_pos);
+    db_handler->write_size += strlen(db_handler->write_pos);
     db_handler->write_pos += strlen(db_handler->write_pos);
     db_handler->item_count += 1;
     pthread_mutex_unlock(&db_handler->lock);
 
     if(db_handler->debug) {
        fprintf(stderr, "Input data %s with timestamp: %ld\n", item->data, item->timestamp);
-       fprintf(stderr, "Inside DB:\n%s\n", db_handler->db_mem_addr);
-       fprintf(stderr, "remaining size: %d\n", db_handler->capacity);
+       fprintf(stderr, "Inside DB:\n%s", db_handler->db_mem_addr);
+       fprintf(stderr, "total write size: %d\n", db_handler->write_size);
+       fprintf(stderr, "remaining size: %d\n\n", db_handler->capacity);
     }
     
     return 0;

@@ -23,33 +23,53 @@ int openTimestampDB(db_handler_s *db_handler, char *db_name, db_access_mode_enum
 
     int size = 0;
     if(mode == READ) {
-        FILE *fptr = fopen(db_handler->db_log_path, "w"); // use write for create new document not exist
+        FILE *fptr = fopen(db_handler->db_log_path, "r"); // use write for create new document not exist
         if(fptr == NULL) {
-            fprintf(stderr, "ERROR: %s not exist\n", db_handler->db_log_path);
+            fprintf(stderr, "ERROR: DB %s is not created yet\n", db_handler->db_log_path);
             return ERR_INVALID_ARG;
         }
-        fseek(fptr, SEEK_END, 0);
+        fseek(fptr, 0, SEEK_END);
         size = ftell(fptr);
+        fseek(fptr, 0, SEEK_SET);
+
+        db_handler->db_mem_addr = (char*)malloc(sizeof(char) * size);
+        if(db_handler->db_mem_addr == NULL ) {
+            perror("Error");
+            return ERR_MEM;
+        }
+        db_handler->write_pos = db_handler->db_mem_addr;
+
+        char *db_buf = NULL;
+        db_buf = (char*)malloc(sizeof(char) * size);
+        if(db_buf == NULL) {
+            return ERR_MEM;
+        }
+        memset(db_buf, 0, size);
+
+        fread(db_buf, sizeof(char), size, fptr);
+        snprintf(db_handler->db_mem_addr, size, "%s", db_buf);
+        if(db_handler->debug) {
+            fprintf(stderr, "After Loading DB:\n%s\n", db_handler->db_mem_addr);
+        }
+
+        free(db_buf);
         fclose(fptr);
     }
 
     else if(mode == WRITE) {
         size = write_size;
+        db_handler->db_mem_addr = (char*)malloc(sizeof(char) * size);
+        if(db_handler->db_mem_addr == NULL ) {
+            perror("Error");
+            return ERR_MEM;
+        }
+        db_handler->write_pos = db_handler->db_mem_addr;
     }
 
     else {
         return ERR_INVALID_ARG;
     }
     db_handler->mode = mode;
-    
-
-    db_handler->db_mem_addr = (char*)malloc(sizeof(char) * size);
-    if(db_handler->db_mem_addr == NULL ) {
-        perror("Error");
-        return ERR_MEM;
-    }
-    db_handler->write_pos = db_handler->db_mem_addr;
-    
 
     db_handler->size = size;
     db_handler->capacity = size;
@@ -78,7 +98,7 @@ int closeTimestampDB(db_handler_s *db_handler) {
         return ERR_INVALID_ARG;
     }
 
-    if(db_handler->status == 0) {
+    if(db_handler->status != 1) {
         fprintf(stderr, "Error: invalid operation on db\n");
         return ERR_NOT_OPEN_DB;
     }
@@ -148,39 +168,32 @@ int writeTimestampDB(db_handler_s *db_handler, db_item_s *item) {
 }
 
 // fill in mem with db log content
-int readTimestampDB(db_handler_s *db_handler, time_t start, time_t end, db_item_s *ret_data) {
-    int i = 0;
-    int item_count = 0;
-    db_item_s item;
+// int readTimestampDB(db_handler_s *db_handler, db_item_s *ret_data) {
+//     int i = 0;
+//     int item_count = 0;
+//     db_item_s item;
 
-    if(db_handler == NULL) {
-        fprintf(stderr, "Error: assign null argument\n");
-        return ERR_INVALID_ARG;
-    }
+//     if(db_handler == NULL) {
+//         fprintf(stderr, "Error: assign null argument\n");
+//         return ERR_INVALID_ARG;
+//     }
 
-    if(db_handler->status != 1) {
-        return ERR_NOT_OPEN_DB;
-    }
+//     if(db_handler->status != 1) {
+//         return ERR_NOT_OPEN_DB;
+//     }
 
-    while(i < db_handler->item_count) {
-        if( getItem(db_handler->db_mem_addr, i, &item) == ERR_NO_ITEM ) {
-            i++;
-            continue;
-        }
+//     while(i < db_handler->item_count) {
+//         if( getItem(db_handler->db_mem_addr, i, &item) == ERR_NO_ITEM ) {
+//             i++;
+//             continue;
+//         }
 
-        if(item.timestamp > start && item.timestamp < end) {
-            fprintf(stderr, "timestamp: %ld, data: %s\n", item.timestamp, item.data);
-            // item.data = (char*)malloc(sizeof(char) * (strlen(item.data) + 1)); // \0
-            // snprintf(ret_data[item_count].data, strlen(item.data) + 1, "%s", item.data);
-            // item_count++;
-        }
-
-        // free(item.data);
-        memset(&item, 0, sizeof(item));
-        i++;
-    }
-    return 0;
-}
+//         // free(item.data);
+//         memset(&item, 0, sizeof(item));
+//         i++;
+//     }
+//     return 0;
+// }
 
 int getItem(char *db_mem, size_t ret_item_index, db_item_s *item) {
     int item_index = 0;

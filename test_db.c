@@ -50,7 +50,11 @@ int main(int argc, char const *argv[])
     closeTimestampDB(&db_1);
     free(linptr);
 
+    // sleep(10);
+
+    openTimestampDB(&db_1, "test", READ, 0, 1);
+
     // readTimestampDB(&db_1, ret);
 
-    // closeTimestampDB(&db_1);
+    closeTimestampDB(&db_1);
 }

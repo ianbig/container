@@ -3,7 +3,7 @@ CFALGS = -Wall -g
 TARGET = timestamp_db
 OBJS = timestamp_db.o test_db.o
 all: ${TARGET}
-	sudo cp ${TARGET} /mnt/share_folder/database
+	sudo cp ${TARGET} /mnt/share_folder/data_base/${TARGET}
 timestamp_db: ${OBJS}
 	${CC} ${CFALGS} ${OBJS} -o ${TARGET}
 timestamp_db.o: timestamp_db.c timestamp_db.h

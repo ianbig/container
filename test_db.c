@@ -48,18 +48,9 @@ int main(int argc, char const *argv[])
         free(item.data);
     }
     closeTimestampDB(&db_1);
-    // free(linptr);
+    free(linptr);
 
-    // time_t end = time(NULL);
-
-    // fprintf(stderr, "start: %ld, end: %ld\n", start, end);
-
-    // readTimestampDB(&db_1, start, end, ret);
+    // readTimestampDB(&db_1, ret);
 
     // closeTimestampDB(&db_1);
-    // for(int i = 0; i < MAXRET; i++) {
-    //     if(ret[i].data != NULL) {
-    //         free(ret[i].data);
-    //     }
-    // }
 }

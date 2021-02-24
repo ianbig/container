@@ -1,4 +1,4 @@
-CC = gcc
+CC = /opt/linaro-armv7ahf-2019.02-gcc7.4/bin/arm-linux-gnueabihf-gcc
 CFALGS = -Wall -g
 TARGET = timestamp_db
 OBJS = timestamp_db.o test_db.o

@@ -1,3 +1,4 @@
+#define GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -6,8 +7,8 @@
 #include <string.h>
 #include "timestamp_db.h"
 
-int getItem(char *db_mem, size_t item_index, db_item_s *item);
-int memGetLine(char *str, char **ret_line);
+int getItem(db_handler_s *db_handler, size_t item_index, db_item_s *item);
+int memGetLine(char *str, char ret_line[], db_handler_s *db_handler);
 
 int openTimestampDB(db_handler_s *db_handler, char *db_name, db_access_mode_enum mode, int write_size, int debug) {
     if(db_name == NULL) {
@@ -21,9 +22,10 @@ int openTimestampDB(db_handler_s *db_handler, char *db_name, db_access_mode_enum
 
     snprintf(db_handler->db_log_path, sizeof(db_handler->db_log_path), "./database/%s.log", db_name);
 
-    int size = 0;
+    size_t size = 0;
     if(mode == READ) {
-        FILE *fptr = fopen(db_handler->db_log_path, "r"); // use write for create new document not exist
+        FILE *fptr = fopen(db_handler->db_log_path, "r");
+        // maybe data race
         if(fptr == NULL) {
             fprintf(stderr, "ERROR: DB %s is not created yet\n", db_handler->db_log_path);
             return ERR_INVALID_ARG;
@@ -31,28 +33,34 @@ int openTimestampDB(db_handler_s *db_handler, char *db_name, db_access_mode_enum
         fseek(fptr, 0, SEEK_END);
         size = ftell(fptr);
         fseek(fptr, 0, SEEK_SET);
+        // maybe data race
 
         db_handler->db_mem_addr = (char*)malloc(sizeof(char) * size);
         if(db_handler->db_mem_addr == NULL ) {
             perror("Error");
             return ERR_MEM;
         }
-        db_handler->write_pos = db_handler->db_mem_addr;
+        // db_handler->write_pos = db_handler->db_mem_addr;
 
-        char *db_buf = NULL;
-        db_buf = (char*)malloc(sizeof(char) * size);
-        if(db_buf == NULL) {
-            return ERR_MEM;
-        }
-        memset(db_buf, 0, size);
-
+        char db_buf[MAXLINE] = {0};
+        memset(db_buf, 0, sizeof(db_buf));
         fread(db_buf, sizeof(char), size, fptr);
-        snprintf(db_handler->db_mem_addr, size, "%s", db_buf);
-        if(db_handler->debug) {
+        snprintf(db_handler->db_mem_addr, size + 1, "%s", db_buf);
+
+
+        if(debug) {
             fprintf(stderr, "After Loading DB:\n%s\n", db_handler->db_mem_addr);
         }
 
-        free(db_buf);
+        char *lineptr = NULL;
+        size_t lindsize = 0;
+        int item_count = 0;
+        fseek(fptr, 0, SEEK_SET);
+        while(getline(&lineptr, &lindsize, fptr) != -1) {
+            item_count++;
+        }
+        db_handler->item_count = item_count;
+
         fclose(fptr);
     }
 
@@ -75,10 +83,12 @@ int openTimestampDB(db_handler_s *db_handler, char *db_name, db_access_mode_enum
     db_handler->capacity = size;
     db_handler->debug = debug;
     db_handler->status = 1;
-    db_handler->item_count = 0;
     db_handler->write_size = 0;
-    // db_handler->last_event_time = {0};
-
+    db_handler->next_read_item_index = 0;
+    db_handler->last_item_timestamp_db = 0;
+    db_handler->last_item_timestamp_read = 0;
+    db_handler->start_ptr = NULL;
+    db_handler->pre_str = NULL;
     pthread_mutex_init(&(db_handler->lock), NULL);
 
     if(db_handler->debug) {
@@ -106,6 +116,7 @@ int closeTimestampDB(db_handler_s *db_handler) {
     if(db_handler->mode == WRITE) {
         FILE *fptr = fopen(db_handler->db_log_path, "a");
         fwrite(db_handler->db_mem_addr, sizeof(char), db_handler->write_size, fptr);
+        fflush(fptr);
         fclose(fptr);
     }
 
@@ -168,41 +179,71 @@ int writeTimestampDB(db_handler_s *db_handler, db_item_s *item) {
 }
 
 // fill in mem with db log content
-// int readTimestampDB(db_handler_s *db_handler, db_item_s *ret_data) {
-//     int i = 0;
-//     int item_count = 0;
-//     db_item_s item;
+int readTimestampDB(db_handler_s *db_handler, db_item_s *ret_data) {
+    if(db_handler == NULL) {
+        fprintf(stderr, "Error: assign null argument\n");
+        return ERR_INVALID_ARG;
+    }
 
-//     if(db_handler == NULL) {
-//         fprintf(stderr, "Error: assign null argument\n");
-//         return ERR_INVALID_ARG;
-//     }
+    if(db_handler->status != 1) {
+        return ERR_NOT_OPEN_DB;
+    }
 
-//     if(db_handler->status != 1) {
-//         return ERR_NOT_OPEN_DB;
-//     }
+    db_item_s item;
 
-//     while(i < db_handler->item_count) {
-//         if( getItem(db_handler->db_mem_addr, i, &item) == ERR_NO_ITEM ) {
-//             i++;
-//             continue;
-//         }
+    struct timespec ctime;
+    if( getItem(db_handler, db_handler->next_read_item_index, &item) == ERR_NO_ITEM ) {
+        return DB_ITEM_READ_FINISH;
+    }
 
-//         // free(item.data);
-//         memset(&item, 0, sizeof(item));
-//         i++;
-//     }
-//     return 0;
-// }
+    if(db_handler->debug) {
+        fprintf(stderr, "checking for input data size: %ld, return_item allow size: %ld\n", \
+            strlen(item.data), sizeof(ret_data->data));
+        fprintf(stderr, "Read item: %ld:%s\n", item.timestamp, item.data);
+    }
 
-int getItem(char *db_mem, size_t ret_item_index, db_item_s *item) {
+    if(db_handler->next_read_item_index == 0) {
+        clock_gettime(CLOCK_MONOTONIC, &ctime);
+        db_handler->last_item_timestamp_read = ctime.tv_sec;
+        db_handler->last_item_timestamp_db = item.timestamp;
+        db_handler->next_read_item_index += 1;
+
+        memset(ret_data->data, 0, sizeof(ret_data->data));
+        snprintf(ret_data->data, sizeof(ret_data->data), "%s", item.data);
+        ret_data->timestamp = item.timestamp;
+
+        return 0;
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &ctime);
+    if( (ctime.tv_sec - db_handler->last_item_timestamp_read) < (item.timestamp - db_handler->last_item_timestamp_db) ) {
+        clock_gettime(CLOCK_MONOTONIC,  &ctime);
+        return DB_ITEM_TIME_NOT_REACH;
+    }
+
+    db_handler->next_read_item_index += 1;
+
+    memset(ret_data->data, 0, sizeof(ret_data->data));
+    snprintf(ret_data->data, sizeof(ret_data->data), "%s", item.data);
+    ret_data->timestamp = item.timestamp;
+    
+    db_handler->last_item_timestamp_db = item.timestamp;
+    db_handler->last_item_timestamp_read = ctime.tv_sec;
+    
+    
+    return 0;
+}
+
+int getItem(db_handler_s *db_handler, size_t ret_item_index, db_item_s *item) {
     int item_index = 0;
-    char *get_line = NULL;
+    char get_line[MAXLINE] = {0};
     int ret = 0;
 
-    while( (ret = memGetLine(db_mem, &get_line)) == 0) {
+    db_handler->start_ptr = db_handler->db_mem_addr; // need to refactor
+    while( (ret = memGetLine(db_handler->db_mem_addr, get_line, db_handler)) == 0) {
         if(item_index != ret_item_index) {
             item_index++;
+            memset(get_line, 0, sizeof(get_line));
             continue;
         }
         break;
@@ -221,50 +262,32 @@ int getItem(char *db_mem, size_t ret_item_index, db_item_s *item) {
     mv_line += strlen(mv_line) + 1; //jump thr /0
 
     data_ptr = strtok(mv_line, "\n");
-    item->data = (char*)malloc(sizeof(char) * strlen(mv_line));
-    if(item->data == NULL) {
-        return ERR_MEM;
-    }
+    memset(item->data, 0 ,sizeof(item->data));
     sscanf(mv_line, "%s", item->data);
-    free(get_line);
 
     return 0;
 }
 
-// // array parsed would not be able to getline again
-// // ret_line must be null
-int memGetLine(char * const str, char **ret_line) {
-    static char *pre_str = NULL;
-    static char *start_ptr;
+
+int memGetLine(char * const str, char ret_line[], db_handler_s *db_handler) {
     char *end_ptr;
 
-    if(str == NULL) {
+    if(db_handler->pre_str != str) {
+        db_handler->start_ptr = str;
+        db_handler->pre_str = str;
+    }
+
+    if( (end_ptr = strchr(db_handler->start_ptr, '\n')) == NULL) {
+        db_handler->pre_str = NULL;
+        db_handler->start_ptr = NULL;
         return -2;
     }
 
-    if(*ret_line == NULL) {
-        start_ptr = str;
-    }
+    size_t line_length = end_ptr - db_handler->start_ptr  + 1;
 
-    if(pre_str != str) {
-        start_ptr = str;
-        pre_str = str;
-    }
-
-    if( (end_ptr = strchr(start_ptr, '\n')) == NULL) {
-        pre_str = NULL;
-        return -1;
-    }
-
-    size_t line_length = end_ptr - start_ptr + 1;
-    if(*ret_line != NULL) {
-        free(*ret_line);
-        *ret_line = NULL;
-    }
-    *ret_line = (char*)malloc(sizeof(char) * line_length);
-
-    memmove(*ret_line, start_ptr, line_length);
-    start_ptr += line_length;
+    memset(ret_line, 0, MAXLINE);
+    memmove(ret_line, db_handler->start_ptr, line_length);
+    db_handler->start_ptr += line_length;
 
     return 0;
 }

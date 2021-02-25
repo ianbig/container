@@ -5,7 +5,7 @@ OBJS = timestamp_db.o test_db.o
 all: ${TARGET}
 	sudo cp ${TARGET} /mnt/share_folder/data_base/${TARGET}
 timestamp_db: ${OBJS}
-	${CC} ${CFALGS} ${OBJS} -o ${TARGET}
+	${CC} ${CFALGS} ${OBJS} -pthread -o ${TARGET}
 timestamp_db.o: timestamp_db.c timestamp_db.h
 	${CC} ${CFLAGS} -c timestamp_db.c
 test_db.o: test_db.c
